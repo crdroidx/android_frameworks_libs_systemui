@@ -98,6 +98,9 @@ public abstract class ViewCapture {
 
     private boolean mIsEnabled = true;
 
+    @VisibleForTesting
+    public boolean mIsStarted = false;
+
     protected ViewCapture(int memorySize, int initPoolSize, Executor bgExecutor) {
         mMemorySize = memorySize;
         mBgExecutor = bgExecutor;
@@ -128,6 +131,7 @@ public abstract class ViewCapture {
     @AnyThread
     @NonNull
     public SafeCloseable startCapture(@NonNull View view, @NonNull String name) {
+        mIsStarted = true;
         WindowListener listener = new WindowListener(view, name);
 
         if (mIsEnabled) {
@@ -160,6 +164,7 @@ public abstract class ViewCapture {
     @VisibleForTesting
     @AnyThread
     public void stopCapture(@NonNull View rootView) {
+        mIsStarted = false;
         mListeners.forEach(it -> {
             if (rootView == it.mRoot) {
                 runOnUiThread(() -> {
