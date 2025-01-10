@@ -18,7 +18,6 @@ package com.android.test.tracing.coroutines
 
 import android.platform.test.annotations.EnableFlags
 import com.android.app.tracing.coroutines.createCoroutineTracingContext
-import com.android.app.tracing.coroutines.flow.collectTraced
 import com.android.app.tracing.coroutines.flow.stateInTraced
 import com.android.app.tracing.coroutines.launchTraced
 import com.android.systemui.Flags.FLAG_COROUTINE_TRACING
@@ -147,8 +146,14 @@ class CallbackFlowTracingTest : TestBase() {
         val repository = ExampleRepositoryImpl(this, bgScope, exampleTracker)
         runTest(totalEvents = 15) {
             launchTraced("collectCombined") {
-                repository.combinedState.collectTraced("combined-states") {
-                    expect("1^main:1^collectCombined", "collect:combined-states", "emit")
+                // upstream flow already has tracing, so tracing with a collect call here would be
+                // redundant. That's why we call `collect` instead of `collectTraced`
+                repository.combinedState.collect {
+                    expect(
+                        "1^main:1^collectCombined",
+                        "collect:combinedState",
+                        "emit:combinedState",
+                    )
                 }
             }
             delay(10)
