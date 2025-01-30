@@ -17,6 +17,8 @@
 package com.google.android.torus.core.engine
 
 import android.app.WallpaperManager
+import android.app.wallpaper.WallpaperDescription
+import android.service.wallpaper.WallpaperService.Engine
 import com.google.android.torus.core.wallpaper.LiveWallpaper
 
 /**
@@ -25,25 +27,30 @@ import com.google.android.torus.core.wallpaper.LiveWallpaper
  */
 interface TorusEngine {
     /**
-     * Called when the engine is created. You should load the assets and initialize the
-     * resources here.
+     * Called when the engine is created. You should load the assets and initialize the resources
+     * here.
      *
      * IMPORTANT: When this function is called, the surface used to render the engine has to be
      * ready.
      *
      * @param isFirstActiveInstance Whether this is the first Engine instance (since the last time
-     * that all instances were destroyed).
+     *   that all instances were destroyed).
      */
     fun create(isFirstActiveInstance: Boolean = true)
 
     /**
-     * Called when the [TorusEngine] resumes.
+     * Called when the event [Engine.onApplyWallpaper] is called.
+     *
+     * @see Engine.onApplyWallpaper
      */
+    fun applyWallpaper(which: Int): WallpaperDescription? {
+        return null
+    }
+
+    /** Called when the [TorusEngine] resumes. */
     fun resume()
 
-    /**
-     * Called when the [TorusEngine] is paused.
-     */
+    /** Called when the [TorusEngine] is paused. */
     fun pause()
 
     /**
@@ -62,8 +69,8 @@ interface TorusEngine {
     fun destroy(isLastActiveInstance: Boolean = true)
 
     /**
-     * Called when the engine changes its destination flag. The destination indicates whether
-     * the wallpaper is drawn on home screen, lock screen, or both. It is a combination of
+     * Called when the engine changes its destination flag. The destination indicates whether the
+     * wallpaper is drawn on home screen, lock screen, or both. It is a combination of
      * [WallpaperManager.FLAG_LOCK] and/or [WallpaperManager.FLAG_SYSTEM]
      */
     fun onWallpaperFlagsChanged(which: Int) {}
