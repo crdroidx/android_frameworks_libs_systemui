@@ -24,7 +24,8 @@ import android.graphics.Bitmap.Config.HARDWARE
 import android.graphics.BlendMode.SRC_IN
 import android.graphics.BlendModeColorFilter
 import android.graphics.Canvas
-import android.graphics.Color
+import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.ColorDrawable
@@ -55,7 +56,14 @@ class MonoIconThemeController(
         factory: BaseIconFactory,
         sourceHint: SourceHint?,
     ): ThemedBitmap? {
-        val mono = getMonochromeDrawable(icon, info, sourceHint?.isFileDrawable ?: false)
+        val mono =
+            getMonochromeDrawable(
+                icon,
+                info,
+                factory.getShapePath(icon, Rect(0, 0, info.icon.width, info.icon.height)),
+                factory.iconScale,
+                sourceHint?.isFileDrawable ?: false,
+            )
         if (mono != null) {
             return MonoThemedBitmap(
                 factory.createIconBitmap(mono, ICON_VISIBLE_AREA_FACTOR, MODE_ALPHA),
@@ -74,14 +82,16 @@ class MonoIconThemeController(
     private fun getMonochromeDrawable(
         base: AdaptiveIconDrawable,
         info: BitmapInfo,
+        shapePath: Path,
+        iconScale: Float,
         isFileDrawable: Boolean,
     ): Drawable? {
         val mono = base.monochrome
         if (mono != null) {
-            return ClippedMonoDrawable(mono)
+            return ClippedMonoDrawable(mono, shapePath, iconScale)
         }
         if (Flags.forceMonochromeAppIcons() && !isFileDrawable) {
-            return MonochromeIconFactory(info.icon.width).wrap(base)
+            return MonochromeIconFactory(info.icon.width).wrap(base, shapePath, iconScale)
         }
         return null
     }
@@ -136,14 +146,16 @@ class MonoIconThemeController(
         return monoDrawable?.let { AdaptiveIconDrawable(ColorDrawable(colors[0]), it) }
     }
 
-    class ClippedMonoDrawable(base: Drawable?) :
-        InsetDrawable(base, -AdaptiveIconDrawable.getExtraInsetFraction()) {
-        private val mCrop = AdaptiveIconDrawable(ColorDrawable(Color.BLACK), null)
+    class ClippedMonoDrawable(
+        base: Drawable?,
+        private val shapePath: Path,
+        private val iconScale: Float,
+    ) : InsetDrawable(base, -AdaptiveIconDrawable.getExtraInsetFraction()) {
 
         override fun draw(canvas: Canvas) {
-            mCrop.bounds = bounds
             val saveCount = canvas.save()
-            canvas.clipPath(mCrop.iconMask)
+            canvas.clipPath(shapePath)
+            canvas.scale(iconScale, iconScale, canvas.width / 2f, canvas.height / 2f)
             super.draw(canvas)
             canvas.restoreToCount(saveCount)
         }
