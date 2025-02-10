@@ -19,7 +19,7 @@ package com.android.app.tracing.coroutines.flow
 import com.android.app.tracing.coroutines.CoroutineTraceName
 import com.android.app.tracing.coroutines.traceCoroutine
 import com.android.app.tracing.coroutines.traceName
-import com.android.app.tracing.traceSection
+import com.android.app.tracing.traceBlocking
 import kotlin.experimental.ExperimentalTypeInference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -65,10 +65,12 @@ internal inline fun <T, R> Flow<T>.unsafeTransform(
 ): Flow<R> = unsafeFlow { collect { value -> transform(value) } }
 
 @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
-private open class TracedSharedFlow<T>(private val name: String, private val flow: SharedFlow<T>) :
-    SharedFlow<T> by flow {
+private open class TracedSharedFlow<out T>(
+    private val name: String,
+    private val flow: SharedFlow<T>,
+) : SharedFlow<T> {
     override val replayCache: List<T>
-        get() = traceSection("replayCache:$name") { flow.replayCache }
+        get() = traceBlocking("replayCache:$name") { flow.replayCache }
 
     override suspend fun collect(collector: FlowCollector<T>): Nothing {
         traceCoroutine("collect:$name") {
@@ -78,38 +80,33 @@ private open class TracedSharedFlow<T>(private val name: String, private val flo
 }
 
 @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
-private open class TracedStateFlow<T>(private val name: String, private val flow: StateFlow<T>) :
-    StateFlow<T> by flow, TracedSharedFlow<T>(name, flow) {
+private open class TracedStateFlow<out T>(
+    private val name: String,
+    private val flow: StateFlow<T>,
+) : StateFlow<T>, TracedSharedFlow<T>(name, flow) {
     override val value: T
-        get() = traceCoroutine("get:$name") { flow.value }
-
-    override val replayCache: List<T>
-        get() = super.replayCache
-
-    override suspend fun collect(collector: FlowCollector<T>): Nothing {
-        super.collect(collector)
-    }
+        get() = traceBlocking("get:$name") { flow.value }
 }
 
 @OptIn(ExperimentalForInheritanceCoroutinesApi::class)
-private class TracedMutableSharedFlow<T>(
+private open class TracedMutableSharedFlow<T>(
     private val name: String,
     private val flow: MutableSharedFlow<T>,
-) : MutableSharedFlow<T> by flow, TracedSharedFlow<T>(name, flow) {
+) : MutableSharedFlow<T>, TracedSharedFlow<T>(name, flow) {
+    override val subscriptionCount: StateFlow<Int>
+        get() = traceBlocking("subscriptionCount:$name") { flow.subscriptionCount }
 
-    override val replayCache: List<T>
-        get() = super.replayCache
+    @ExperimentalCoroutinesApi
+    override fun resetReplayCache() {
+        traceBlocking("resetReplayCache:$name") { flow.resetReplayCache() }
+    }
 
     override suspend fun emit(value: T) {
         traceCoroutine("emit:$name") { flow.emit(value) }
     }
 
     override fun tryEmit(value: T): Boolean {
-        return traceCoroutine("tryEmit:$name") { flow.tryEmit(value) }
-    }
-
-    override suspend fun collect(collector: FlowCollector<T>): Nothing {
-        super.collect(collector)
+        return traceBlocking("tryEmit:$name") { flow.tryEmit(value) }
     }
 }
 
@@ -117,31 +114,15 @@ private class TracedMutableSharedFlow<T>(
 private class TracedMutableStateFlow<T>(
     private val name: String,
     private val flow: MutableStateFlow<T>,
-) : MutableStateFlow<T> by flow, TracedStateFlow<T>(name, flow) {
-
+) : MutableStateFlow<T>, TracedMutableSharedFlow<T>(name, flow) {
     override var value: T
-        get() = super.value
+        get() = traceBlocking("get:$name") { flow.value }
         set(newValue) {
-            traceSection("updateState:$name") { flow.value = newValue }
+            traceBlocking("updateState:$name") { flow.value = newValue }
         }
-
-    override val replayCache: List<T>
-        get() = super.replayCache
-
-    override suspend fun emit(value: T) {
-        traceCoroutine("emit:$name") { flow.emit(value) }
-    }
-
-    override suspend fun collect(collector: FlowCollector<T>): Nothing {
-        traceCoroutine("collect:$name") {
-            flow.collect { traceCoroutine("emit:$name") { collector.emit(it) } }
-        }
-    }
 
     override fun compareAndSet(expect: T, update: T): Boolean {
-        traceSection("updateState:$name") {
-            return flow.compareAndSet(expect, update)
-        }
+        return traceBlocking("compareAndSet:$name") { flow.compareAndSet(expect, update) }
     }
 }
 
@@ -172,27 +153,61 @@ public fun <T> Flow<T>.flowName(name: String): Flow<T> = traceAs(name)
 
 public fun <T> Flow<T>.traceAs(name: String): Flow<T> {
     return if (com.android.systemui.Flags.coroutineTracing()) {
-        unsafeFlow {
-            traceCoroutine("collect:$name") {
-                collect { value -> traceCoroutine("emit:$name") { emit(value) } }
-            }
+        return when (this) {
+            is SharedFlow -> traceAs(name)
+            else ->
+                unsafeFlow {
+                    traceCoroutine("collect:$name") {
+                        collect { value -> traceCoroutine("emit:$name") { emit(value) } }
+                    }
+                }
         }
     } else {
         this
     }
 }
 
-public fun <T> SharedFlow<T>.traceAs(name: String): SharedFlow<T> =
-    if (com.android.systemui.Flags.coroutineTracing()) TracedSharedFlow(name, this) else this
+public fun <T> SharedFlow<T>.traceAs(name: String): SharedFlow<T> {
+    return if (com.android.systemui.Flags.coroutineTracing()) {
+        when (this) {
+            is MutableSharedFlow -> traceAs(name)
+            is StateFlow -> traceAs(name)
+            else -> TracedSharedFlow(name, this)
+        }
+    } else {
+        this
+    }
+}
 
-public fun <T> StateFlow<T>.traceAs(name: String): StateFlow<T> =
-    if (com.android.systemui.Flags.coroutineTracing()) TracedStateFlow(name, this) else this
+public fun <T> StateFlow<T>.traceAs(name: String): StateFlow<T> {
+    return if (com.android.systemui.Flags.coroutineTracing()) {
+        when (this) {
+            is MutableStateFlow -> traceAs(name)
+            else -> TracedStateFlow(name, this)
+        }
+    } else {
+        this
+    }
+}
 
-public fun <T> MutableSharedFlow<T>.traceAs(name: String): MutableSharedFlow<T> =
-    if (com.android.systemui.Flags.coroutineTracing()) TracedMutableSharedFlow(name, this) else this
+public fun <T> MutableSharedFlow<T>.traceAs(name: String): MutableSharedFlow<T> {
+    return if (com.android.systemui.Flags.coroutineTracing()) {
+        when (this) {
+            is MutableStateFlow -> traceAs(name)
+            else -> TracedMutableSharedFlow(name, this)
+        }
+    } else {
+        this
+    }
+}
 
-public fun <T> MutableStateFlow<T>.traceAs(name: String): MutableStateFlow<T> =
-    if (com.android.systemui.Flags.coroutineTracing()) TracedMutableStateFlow(name, this) else this
+public fun <T> MutableStateFlow<T>.traceAs(name: String): MutableStateFlow<T> {
+    return if (com.android.systemui.Flags.coroutineTracing()) {
+        TracedMutableStateFlow(name, this)
+    } else {
+        this
+    }
+}
 
 public fun <T> Flow<T>.onEachTraced(name: String, action: suspend (T) -> Unit): Flow<T> {
     return onEach { value -> traceCoroutine(name) { action(value) } }
