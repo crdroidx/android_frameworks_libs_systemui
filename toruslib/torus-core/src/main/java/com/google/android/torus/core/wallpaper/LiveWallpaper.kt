@@ -284,6 +284,11 @@ abstract class LiveWallpaper : WallpaperService() {
             if (wallpaperEngine is TorusTouchListener) setTouchEventsEnabled(true)
         }
 
+        override fun onApplyWallpaper(which: Int): WallpaperDescription? {
+            super.onApplyWallpaper(which)
+            return wallpaperEngine.applyWallpaper(which)
+        }
+
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
 
