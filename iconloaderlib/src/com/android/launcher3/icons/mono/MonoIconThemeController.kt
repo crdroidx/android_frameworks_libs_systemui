@@ -45,6 +45,8 @@ class MonoIconThemeController(
     private val colorProvider: (Context) -> IntArray = ThemedIconDrawable.Companion::getColors
 ) : IconThemeController {
 
+    override val themeID = "with-theme"
+
     override fun createThemedBitmap(
         icon: AdaptiveIconDrawable,
         info: BitmapInfo,

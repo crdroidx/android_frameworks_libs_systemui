@@ -32,6 +32,8 @@ interface ThemedBitmap {
 
 interface IconThemeController {
 
+    val themeID: String
+
     fun createThemedBitmap(
         icon: AdaptiveIconDrawable,
         info: BitmapInfo,
