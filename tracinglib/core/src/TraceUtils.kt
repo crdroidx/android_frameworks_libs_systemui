@@ -125,6 +125,22 @@ public inline fun <T> traceSection(tag: () -> String, block: () -> T): T {
     }
 }
 
+/**
+ * Like [com.android.app.tracing.traceSection], but uses `crossinline` so we don't accidentally
+ * introduce non-local returns. This is less convenient to use, but it ensures we will not
+ * accidentally pass a suspending function to this method.
+ */
+@OptIn(ExperimentalContracts::class)
+internal inline fun <T> traceBlocking(sectionName: String, crossinline block: () -> T): T {
+    contract { callsInPlace(block, InvocationKind.EXACTLY_ONCE) }
+    Trace.traceBegin(Trace.TRACE_TAG_APP, sectionName)
+    return try {
+        block()
+    } finally {
+        Trace.traceEnd(Trace.TRACE_TAG_APP)
+    }
+}
+
 @OptIn(ExperimentalContracts::class)
 public object TraceUtils {
     public const val TAG: String = "TraceUtils"
