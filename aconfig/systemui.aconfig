@@ -121,3 +121,10 @@ flag {
     description: "Enables extended wallpaper effects"
     bug: "334125919"
 }
+
+flag {
+    name: "enable_lpp_squeeze_effect"
+    namespace: "systemui"
+    description: "Enables squeeze effect on power button long press launching Gemini"
+    bug: "396099245"
+}
