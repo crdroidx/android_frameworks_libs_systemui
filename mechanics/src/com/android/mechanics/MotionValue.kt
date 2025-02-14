@@ -119,7 +119,7 @@ class MotionValue(
     private val gestureContext: GestureContext,
     initialSpec: MotionSpec = MotionSpec.Empty,
     val label: String? = null,
-    private val stableThreshold: Float = 0.01f,
+    private val stableThreshold: Float = StableThresholdEffect,
 ) : FloatState {
 
     /** The [MotionSpec] describing the mapping of this [MotionValue]'s input to the output. */
@@ -269,6 +269,9 @@ class MotionValue(
                 stableThreshold = stableThreshold,
             )
         }
+
+        const val StableThresholdEffect = 0.01f
+        const val StableThresholdSpatial = 1f
 
         internal const val TAG = "MotionValue"
     }
