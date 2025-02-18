@@ -20,6 +20,7 @@ package com.android.mechanics
 
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.TestMonotonicFrameClock
@@ -41,6 +42,7 @@ import com.android.mechanics.testing.MotionValueToolkit.Companion.isStable
 import com.android.mechanics.testing.MotionValueToolkit.Companion.output
 import com.android.mechanics.testing.goldenTest
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
@@ -337,7 +339,7 @@ class MotionValueTest {
 
     @Test
     fun keepRunning_concurrentInvocationThrows() = runTestWithFrameClock { testScheduler, _ ->
-        val underTest = MotionValue({ 1f }, FakeGestureContext)
+        val underTest = MotionValue({ 1f }, FakeGestureContext, label = "Foo")
         val realJob = launch { underTest.keepRunning() }
         testScheduler.runCurrent()
 
@@ -347,7 +349,7 @@ class MotionValueTest {
             // keepRunning returns Nothing, will never get here
         } catch (e: Throwable) {
             assertThat(e).isInstanceOf(IllegalStateException::class.java)
-            assertThat(e).hasMessageThat().contains("keepRunning() invoked while already running")
+            assertThat(e).hasMessageThat().contains("MotionValue(Foo) is already running")
         }
         assertThat(realJob.isActive).isTrue()
         realJob.cancel()
@@ -451,6 +453,34 @@ class MotionValueTest {
         // test runs). That time is expected to be 100% reproducible, given the starting
         // state/configuration of the spring before awaitIdle().
         assertThat(rule.mainClock.currentTime).isEqualTo(timeBeforeAutoAdvance + 176)
+    }
+
+    @Test
+    fun keepRunningWhile_stopRunningWhileStable_endsImmediately() = runTest {
+        val input = mutableFloatStateOf(0f)
+        val spec = specBuilder(Mapping.Zero).toBreakpoint(1f).completeWith(Mapping.One)
+        val underTest = MotionValue(input::value, FakeGestureContext, spec)
+
+        val continueRunning = mutableStateOf(true)
+
+        rule.setContent {
+            LaunchedEffect(Unit) { underTest.keepRunningWhile { continueRunning.value } }
+        }
+
+        val inspector = underTest.debugInspector()
+
+        rule.awaitIdle()
+
+        assertWithMessage("isActive").that(inspector.isActive).isTrue()
+        assertWithMessage("isAnimating").that(inspector.isAnimating).isFalse()
+
+        val timeBeforeStopRunning = rule.mainClock.currentTime
+        continueRunning.value = false
+        rule.awaitIdle()
+
+        assertWithMessage("isActive").that(inspector.isActive).isFalse()
+        assertWithMessage("isAnimating").that(inspector.isAnimating).isFalse()
+        assertThat(rule.mainClock.currentTime).isEqualTo(timeBeforeStopRunning + 16)
     }
 
     @Test

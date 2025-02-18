@@ -28,8 +28,10 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.util.packFloats
+import androidx.compose.ui.util.packInts
 import androidx.compose.ui.util.unpackFloat1
 import androidx.compose.ui.util.unpackFloat2
+import androidx.compose.ui.util.unpackInt1
 import com.android.mechanics.debug.DebugInspector
 import com.android.mechanics.debug.FrameData
 import com.android.mechanics.spec.Breakpoint
@@ -43,10 +45,10 @@ import com.android.mechanics.spring.SpringState
 import com.android.mechanics.spring.calculateUpdatedState
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
-import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Computes an animated [output] value, by mapping the [currentInput] according to the [spec].
@@ -155,10 +157,28 @@ class MotionValue(
      *
      * Internally, this method does suspend, unless there are animations ongoing.
      */
-    suspend fun keepRunning(): Nothing = coroutineScope {
-        check(!isActive) { "keepRunning() invoked while already running" }
-        isActive = true
-        try {
+    suspend fun keepRunning(): Nothing {
+        keepRunningWhile { true }
+
+        // `keepRunning` above will never finish,
+        throw AssertionError("Unreachable code")
+    }
+
+    /**
+     * Keeps the [MotionValue]'s animated output running while [continueRunning] returns `true`.
+     *
+     * When [continueRunning] returns `false`, the coroutine will end by the next frame.
+     *
+     * To keep the [MotionValue] running until the current animations are complete, check for
+     * `isStable` as well.
+     *
+     * ```kotlin
+     * motionValue.keepRunningWhile { !shouldEnd() || !isStable }
+     * ```
+     */
+    suspend fun keepRunningWhile(continueRunning: MotionValue.() -> Boolean) =
+        withContext(CoroutineName("MotionValue($label)")) {
+            check(!isActive) { "MotionValue($label) is already running" }
             // The purpose of this implementation is to run an animation frame (via withFrameNanos)
             // whenever the input changes, or the spring is still settling, but otherwise just
             // suspend.
@@ -168,90 +188,107 @@ class MotionValue(
 
             // `true` while the spring is settling.
             var runAnimationFrames = !isStable
-            launch {
-                // TODO(b/383979536) use a SnapshotStateObserver instead
-                snapshotFlow {
-                        // observe all input values
-                        var result = spec.hashCode()
-                        result = result * 31 + currentInput().hashCode()
-                        result = result * 31 + currentDirection.hashCode()
-                        result = result * 31 + currentGestureDragOffset.hashCode()
+            var cancellationRequested = !continueRunning.invoke(this@MotionValue)
 
-                        // Track whether the spring needs animation frames to finish
-                        // In fact, whether the spring is settling is the only relevant bit to
-                        // export from here. For everything else, just cause the flow to emit a
-                        // different value (hence the hashing)
-                        (result shl 1) + if (isStable) 0 else 1
+            val observationJob = launch {
+                // TODO(b/383979536) use a SnapshotStateObserver instead
+                val runAnimationFramesFlag = 1 shl 0
+                val cancellationRequestFlag = 1 shl 1
+
+                snapshotFlow {
+                        // observe all input values.
+
+                        // This part of the code does not actually care about the value itself - it
+                        // merely wants to know whether they changed. The hashCode is used as an
+                        // proxy for this.
+                        var inputHash = spec.hashCode()
+                        inputHash = inputHash * 31 + currentInput().hashCode()
+                        inputHash = inputHash * 31 + currentDirection.hashCode()
+                        inputHash = inputHash * 31 + currentGestureDragOffset.hashCode()
+
+                        // The relevant things to observe here is whether `isStable` changed, or
+                        // the `continueRunning()` is updated.
+                        val doContinueRunning = continueRunning.invoke(this@MotionValue)
+
+                        val stateFlags =
+                            (if (!isStable) runAnimationFramesFlag else 0) or
+                                (if (!doContinueRunning) cancellationRequestFlag else 0)
+
+                        // Send both of it as packed value to avoid per-frame allocations.
+                        packInts(stateFlags, inputHash)
                     }
-                    .collect { hashedState ->
-                        // while the 'runAnimationFrames' bit was set on the result
-                        runAnimationFrames = (hashedState and 1) != 0
+                    .collect { packedState ->
+                        val stateFlags = unpackInt1(packedState)
+                        runAnimationFrames = (stateFlags and runAnimationFramesFlag) != 0
+                        cancellationRequested = (stateFlags and cancellationRequestFlag) != 0
+
                         // nudge the animation runner in case its sleeping.
                         wakeupChannel.send(Unit)
                     }
             }
 
-            while (true) {
-                if (!runAnimationFrames) {
-                    // While the spring does not need animation frames (its stable), wait until
-                    // woken up - this can be for a single frame after an input change.
-                    debugIsAnimating = false
-                    wakeupChannel.receive()
+            isActive = true
+            try {
+                while (!cancellationRequested) {
+
+                    if (!runAnimationFrames) {
+                        // While the spring does not need animation frames (its stable), wait until
+                        // woken up - this can be for a single frame after an input change.
+                        debugIsAnimating = false
+                        wakeupChannel.receive()
+                    }
+
+                    debugIsAnimating = true
+                    withFrameNanos { frameTimeNanos -> currentAnimationTimeNanos = frameTimeNanos }
+
+                    // At this point, the complete frame is done (including layout, drawing and
+                    // everything else). What follows next is similar what one would do in a
+                    // `SideEffect`, were this composable code:
+                    // If during the last frame, a new animation was started, or a new segment
+                    // entered,  this state is copied over. If nothing changed, the computed
+                    // `current*` state will be the same, it won't have a side effect.
+
+                    // Capturing the state here is required since crossing a breakpoint is an
+                    // event - the code has to record that this happened.
+
+                    // Important - capture all values first, and only afterwards update the state.
+                    // Interleaving read and update might trigger immediate re-computations.
+                    val newSegment = currentSegment
+                    val newGuaranteeState = currentGuaranteeState
+                    val newAnimation = currentAnimation
+                    val newSpringState = currentSpringState
+
+                    // Capture the last frames input.
+                    lastFrameTimeNanos = currentAnimationTimeNanos
+                    lastInput = currentInput()
+                    lastGestureDragOffset = currentGestureDragOffset
+                    // Not capturing currentDirection and spec explicitly, they are included in
+                    // lastSegment
+
+                    // Update the state to the computed `current*` values
+                    lastSegment = newSegment
+                    lastGuaranteeState = newGuaranteeState
+                    lastAnimation = newAnimation
+                    lastSpringState = newSpringState
+                    debugInspector?.run {
+                        frame =
+                            FrameData(
+                                lastInput,
+                                currentDirection,
+                                lastGestureDragOffset,
+                                lastFrameTimeNanos,
+                                lastSpringState,
+                                lastSegment,
+                                lastAnimation,
+                            )
+                    }
                 }
-
-                debugIsAnimating = true
-                withFrameNanos { frameTimeNanos -> currentAnimationTimeNanos = frameTimeNanos }
-
-                // At this point, the complete frame is done (including layout, drawing and
-                // everything else). What follows next is similar what one would do in a
-                // `SideEffect`, were this composable code:
-                // If during the last frame, a new animation was started, or a new segment entered,
-                // this state is copied over. If nothing changed, the computed `current*` state will
-                // be the same, it won't have a side effect.
-
-                // Capturing the state here is required since crossing a breakpoint is an event -
-                // the code has to record that this happened.
-
-                // Important - capture all values first, and only afterwards update the state.
-                // Interleaving read and update might trigger immediate re-computations.
-                val newSegment = currentSegment
-                val newGuaranteeState = currentGuaranteeState
-                val newAnimation = currentAnimation
-                val newSpringState = currentSpringState
-
-                // Capture the last frames input.
-                lastFrameTimeNanos = currentAnimationTimeNanos
-                lastInput = currentInput()
-                lastGestureDragOffset = currentGestureDragOffset
-                // Not capturing currentDirection and spec explicitly, they are included in
-                // lastSegment
-
-                // Update the state to the computed `current*` values
-                lastSegment = newSegment
-                lastGuaranteeState = newGuaranteeState
-                lastAnimation = newAnimation
-                lastSpringState = newSpringState
-                debugInspector?.run {
-                    frame =
-                        FrameData(
-                            lastInput,
-                            currentDirection,
-                            lastGestureDragOffset,
-                            lastFrameTimeNanos,
-                            lastSpringState,
-                            lastSegment,
-                            lastAnimation,
-                        )
-                }
+            } finally {
+                observationJob.cancel()
+                isActive = false
+                debugIsAnimating = false
             }
-
-            // Keep the compiler happy - the while (true) {} above will not complete, yet the
-            // compiler wants a return value.
-            @Suppress("UNREACHABLE_CODE") awaitCancellation()
-        } finally {
-            isActive = false
         }
-    }
 
     companion object {
         /** Creates a [MotionValue] whose [currentInput] is the animated [output] of [source]. */
