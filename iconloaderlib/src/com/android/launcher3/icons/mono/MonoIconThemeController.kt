@@ -53,7 +53,7 @@ class MonoIconThemeController(
         factory: BaseIconFactory,
         sourceHint: SourceHint?,
     ): ThemedBitmap? {
-        val mono = getMonochromeDrawable(icon, info)
+        val mono = getMonochromeDrawable(icon, info, sourceHint?.isFileDrawable ?: false)
         if (mono != null) {
             val scale =
                 factory.normalizer.getScale(AdaptiveIconDrawable(ColorDrawable(Color.BLACK), null))
@@ -71,12 +71,16 @@ class MonoIconThemeController(
      *
      * @param base the original icon
      */
-    private fun getMonochromeDrawable(base: AdaptiveIconDrawable, info: BitmapInfo): Drawable? {
+    private fun getMonochromeDrawable(
+        base: AdaptiveIconDrawable,
+        info: BitmapInfo,
+        isFileDrawable: Boolean,
+    ): Drawable? {
         val mono = base.monochrome
         if (mono != null) {
             return ClippedMonoDrawable(mono)
         }
-        if (Flags.forceMonochromeAppIcons()) {
+        if (Flags.forceMonochromeAppIcons() && !isFileDrawable) {
             return MonochromeIconFactory(info.icon.width).wrap(base)
         }
         return null
