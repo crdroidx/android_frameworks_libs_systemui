@@ -33,7 +33,9 @@ import android.graphics.drawable.InsetDrawable
 import android.os.Build
 import com.android.launcher3.Flags
 import com.android.launcher3.icons.BaseIconFactory
+import com.android.launcher3.icons.BaseIconFactory.MODE_ALPHA
 import com.android.launcher3.icons.BitmapInfo
+import com.android.launcher3.icons.IconNormalizer.ICON_VISIBLE_AREA_FACTOR
 import com.android.launcher3.icons.IconThemeController
 import com.android.launcher3.icons.MonochromeIconFactory
 import com.android.launcher3.icons.SourceHint
@@ -55,10 +57,8 @@ class MonoIconThemeController(
     ): ThemedBitmap? {
         val mono = getMonochromeDrawable(icon, info)
         if (mono != null) {
-            val scale =
-                factory.normalizer.getScale(AdaptiveIconDrawable(ColorDrawable(Color.BLACK), null))
             return MonoThemedBitmap(
-                factory.createIconBitmap(mono, scale, BaseIconFactory.MODE_ALPHA),
+                factory.createIconBitmap(mono, ICON_VISIBLE_AREA_FACTOR, MODE_ALPHA),
                 factory.whiteShadowLayer,
                 colorProvider,
             )

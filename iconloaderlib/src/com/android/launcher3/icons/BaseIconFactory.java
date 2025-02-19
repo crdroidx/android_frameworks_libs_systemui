@@ -93,9 +93,6 @@ public class BaseIconFactory implements AutoCloseable {
     protected IconThemeController mThemeController;
 
     @Nullable
-    private IconNormalizer mNormalizer;
-
-    @Nullable
     private ShadowGenerator mShadowGenerator;
 
     // Shadow bitmap used as background for theme icons
@@ -133,14 +130,6 @@ public class BaseIconFactory implements AutoCloseable {
             mShadowGenerator = new ShadowGenerator(mIconBitmapSize);
         }
         return mShadowGenerator;
-    }
-
-    @NonNull
-    public IconNormalizer getNormalizer() {
-        if (mNormalizer == null) {
-            mNormalizer = new IconNormalizer(mContext, mIconBitmapSize);
-        }
-        return mNormalizer;
     }
 
     @Nullable
@@ -322,9 +311,8 @@ public class BaseIconFactory implements AutoCloseable {
             return null;
         }
 
-        AdaptiveIconDrawable adaptiveIcon = wrapToAdaptiveIcon(icon);
-        outScale[0] = getNormalizer().getScale(adaptiveIcon);
-        return adaptiveIcon;
+        outScale[0] = IconNormalizer.ICON_VISIBLE_AREA_FACTOR;
+        return wrapToAdaptiveIcon(icon);
     }
 
     /**
@@ -356,7 +344,7 @@ public class BaseIconFactory implements AutoCloseable {
             AdaptiveIconDrawable dr = new AdaptiveIconDrawable(
                     new ColorDrawable(mWrapperBackgroundColor), foreground);
             dr.setBounds(0, 0, 1, 1);
-            float scale = getNormalizer().getScale(icon);
+            float scale = new IconNormalizer(mIconBitmapSize).getScale(icon);
             foreground.setDrawable(createScaledDrawable(icon, scale * LEGACY_ICON_SCALE));
             return dr;
         }
