@@ -26,6 +26,8 @@ import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.util.fastCoerceAtLeast
+import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.util.packFloats
 import androidx.compose.ui.util.unpackFloat1
@@ -548,7 +550,7 @@ class MotionValue(
      * last frame, but that is likely good enough.
      */
     private fun lastFrameFractionOfPosition(position: Float): Float {
-        return ((position - lastInput) / (currentInput() - lastInput)).coerceIn(0f, 1f)
+        return ((position - lastInput) / (currentInput() - lastInput)).fastCoerceIn(0f, 1f)
     }
 
     /**
@@ -715,7 +717,7 @@ class MotionValue(
                     var segmentIndex = sourceIndex
                     while (segmentIndex != targetIndex) {
                         val nextBreakpoint =
-                            breakpoints[segmentIndex + directionOffset.coerceAtLeast(0)]
+                            breakpoints[segmentIndex + directionOffset.fastCoerceAtLeast(0)]
 
                         val nextBreakpointFrameFraction =
                             lastFrameFractionOfPosition(nextBreakpoint.position)
@@ -931,7 +933,7 @@ internal value class GuaranteeState(val packedValue: Long) {
     fun withCurrentValue(value: Float, direction: InputDirection): GuaranteeState {
         if (isInactive) return Inactive
 
-        val delta = ((value - start) * direction.sign).coerceAtLeast(0f)
+        val delta = ((value - start) * direction.sign).fastCoerceAtLeast(0f)
         return GuaranteeState(start, max(delta, maxDelta))
     }
 
