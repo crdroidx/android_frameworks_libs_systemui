@@ -144,6 +144,7 @@ private object PerfettoTraceConfig {
 
     init {
         if (android.os.Flags.perfettoSdkTracingV2()) {
+            PerfettoTrace.register(/* isBackendInProcess */ false)
             COROUTINE_CATEGORY.register()
         }
     }
