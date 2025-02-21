@@ -231,8 +231,14 @@ public class BaseIconFactory implements AutoCloseable {
         if (adaptiveIcon instanceof Extender extender) {
             info = extender.getExtendedInfo(bitmap, color, this, scale[0]);
         } else if (IconProvider.ATLEAST_T && mThemeController != null && adaptiveIcon != null) {
-            info.setThemedBitmap(mThemeController.createThemedBitmap(
-                    adaptiveIcon, info, this, options == null ? null : options.mSourceHint));
+            info.setThemedBitmap(
+                    mThemeController.createThemedBitmap(
+                        adaptiveIcon,
+                        info,
+                        this,
+                        options == null ? null : options.mSourceHint
+                    )
+            );
         }
         info = info.withFlags(getBitmapFlagOp(options));
         return info;
@@ -276,8 +282,12 @@ public class BaseIconFactory implements AutoCloseable {
     }
 
     @NonNull
-    protected Path getShapePath(AdaptiveIconDrawable drawable, Rect iconBounds) {
+    public Path getShapePath(AdaptiveIconDrawable drawable, Rect iconBounds) {
         return drawable.getIconMask();
+    }
+
+    public float getIconScale() {
+        return 1f;
     }
 
     @NonNull
