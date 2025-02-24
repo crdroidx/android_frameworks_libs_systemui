@@ -63,7 +63,6 @@ class MonoIconThemeController(
                 factory.getShapePath(icon, Rect(0, 0, info.icon.width, info.icon.height)),
                 factory.iconScale,
                 sourceHint?.isFileDrawable ?: false,
-                factory.shouldForceThemeIcon(),
             )
         if (mono != null) {
             return MonoThemedBitmap(
@@ -86,13 +85,12 @@ class MonoIconThemeController(
         shapePath: Path,
         iconScale: Float,
         isFileDrawable: Boolean,
-        shouldForceThemeIcon: Boolean,
     ): Drawable? {
         val mono = base.monochrome
         if (mono != null) {
             return ClippedMonoDrawable(mono, shapePath, iconScale)
         }
-        if (Flags.forceMonochromeAppIcons() && shouldForceThemeIcon && !isFileDrawable) {
+        if (Flags.forceMonochromeAppIcons() && !isFileDrawable) {
             return MonochromeIconFactory(info.icon.width).wrap(base, shapePath, iconScale)
         }
         return null
