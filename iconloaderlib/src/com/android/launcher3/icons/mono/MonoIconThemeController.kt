@@ -24,6 +24,7 @@ import android.graphics.Bitmap.Config.HARDWARE
 import android.graphics.BlendMode.SRC_IN
 import android.graphics.BlendModeColorFilter
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
@@ -151,11 +152,18 @@ class MonoIconThemeController(
         private val shapePath: Path,
         private val iconScale: Float,
     ) : InsetDrawable(base, -AdaptiveIconDrawable.getExtraInsetFraction()) {
+        // TODO(b/399666950): remove this after launcher icon shapes is fully enabled
+        private val mCrop = AdaptiveIconDrawable(ColorDrawable(Color.BLACK), null)
 
         override fun draw(canvas: Canvas) {
+            mCrop.bounds = bounds
             val saveCount = canvas.save()
-            canvas.clipPath(shapePath)
-            canvas.scale(iconScale, iconScale, canvas.width / 2f, canvas.height / 2f)
+            if (Flags.enableLauncherIconShapes()) {
+                canvas.clipPath(shapePath)
+                canvas.scale(iconScale, iconScale, bounds.width() / 2f, bounds.height() / 2f)
+            } else {
+                canvas.clipPath(mCrop.iconMask)
+            }
             super.draw(canvas)
             canvas.restoreToCount(saveCount)
         }
