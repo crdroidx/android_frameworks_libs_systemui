@@ -24,6 +24,7 @@ import android.graphics.Bitmap.Config.HARDWARE
 import android.graphics.BlendMode.SRC_IN
 import android.graphics.BlendModeColorFilter
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Path
 import android.graphics.Rect
 import android.graphics.drawable.AdaptiveIconDrawable
@@ -63,6 +64,7 @@ class MonoIconThemeController(
                 factory.getShapePath(icon, Rect(0, 0, info.icon.width, info.icon.height)),
                 factory.iconScale,
                 sourceHint?.isFileDrawable ?: false,
+                factory.shouldForceThemeIcon(),
             )
         if (mono != null) {
             return MonoThemedBitmap(
@@ -85,12 +87,13 @@ class MonoIconThemeController(
         shapePath: Path,
         iconScale: Float,
         isFileDrawable: Boolean,
+        shouldForceThemeIcon: Boolean,
     ): Drawable? {
         val mono = base.monochrome
         if (mono != null) {
             return ClippedMonoDrawable(mono, shapePath, iconScale)
         }
-        if (Flags.forceMonochromeAppIcons() && !isFileDrawable) {
+        if (Flags.forceMonochromeAppIcons() && shouldForceThemeIcon && !isFileDrawable) {
             return MonochromeIconFactory(info.icon.width).wrap(base, shapePath, iconScale)
         }
         return null
@@ -151,11 +154,18 @@ class MonoIconThemeController(
         private val shapePath: Path,
         private val iconScale: Float,
     ) : InsetDrawable(base, -AdaptiveIconDrawable.getExtraInsetFraction()) {
+        // TODO(b/399666950): remove this after launcher icon shapes is fully enabled
+        private val mCrop = AdaptiveIconDrawable(ColorDrawable(Color.BLACK), null)
 
         override fun draw(canvas: Canvas) {
+            mCrop.bounds = bounds
             val saveCount = canvas.save()
-            canvas.clipPath(shapePath)
-            canvas.scale(iconScale, iconScale, canvas.width / 2f, canvas.height / 2f)
+            if (Flags.enableLauncherIconShapes()) {
+                canvas.clipPath(shapePath)
+                canvas.scale(iconScale, iconScale, bounds.width() / 2f, bounds.height() / 2f)
+            } else {
+                canvas.clipPath(mCrop.iconMask)
+            }
             super.draw(canvas)
             canvas.restoreToCount(saveCount)
         }
