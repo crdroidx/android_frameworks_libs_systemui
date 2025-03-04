@@ -143,3 +143,10 @@ flag {
     description: "Enables squeeze effect on power button long press launching Gemini"
     bug: "396099245"
 }
+
+flag {
+  name: "cursor_hot_corner"
+  namespace: "systemui"
+  description: "Enables hot corner navigation by cursor"
+  bug: "397182595"
+}
