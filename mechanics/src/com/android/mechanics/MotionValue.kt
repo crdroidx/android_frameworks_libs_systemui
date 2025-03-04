@@ -16,6 +16,7 @@
 
 package com.android.mechanics
 
+import android.util.Log
 import androidx.compose.runtime.FloatState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -28,6 +29,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.util.fastCoerceIn
+import androidx.compose.ui.util.fastIsFinite
 import androidx.compose.ui.util.lerp
 import androidx.compose.ui.util.packFloats
 import androidx.compose.ui.util.unpackFloat1
@@ -670,10 +672,23 @@ class MotionValue(
             SegmentChangeType.Direction,
             SegmentChangeType.Spec -> {
                 // Determine the delta in the output, as produced by the old and new mapping.
-                val delta =
-                    currentSegment.mapping.map(currentInput) - lastSegment.mapping.map(currentInput)
+                val currentMapping = currentSegment.mapping.map(currentInput)
+                val lastMapping = lastSegment.mapping.map(currentInput)
+                val delta = currentMapping - lastMapping
 
-                if (delta == 0f) {
+                val deltaIsFinite = delta.fastIsFinite()
+                if (!deltaIsFinite) {
+                    Log.wtf(
+                        TAG,
+                        "Delta between mappings is undefined!\n" +
+                            "  MotionValue: $label\n" +
+                            "  input: $currentInput\n" +
+                            "  lastMapping: $lastMapping (lastSegment: $lastSegment)\n" +
+                            "  currentMapping: $currentMapping (currentSegment: $currentSegment)",
+                    )
+                }
+
+                if (delta == 0f || !deltaIsFinite) {
                     // Nothing new to animate.
                     lastAnimation
                 } else {
@@ -765,14 +780,28 @@ class MotionValue(
                             )
                         lastAnimationTime = nextBreakpointCrossTime
 
-                        val beforeBreakpoint = mappings[segmentIndex].map(nextBreakpoint.position)
-                        val afterBreakpoint =
-                            mappings[segmentIndex + directionOffset].map(nextBreakpoint.position)
+                        val mappingBefore = mappings[segmentIndex]
+                        val beforeBreakpoint = mappingBefore.map(nextBreakpoint.position)
+                        val mappingAfter = mappings[segmentIndex + directionOffset]
+                        val afterBreakpoint = mappingAfter.map(nextBreakpoint.position)
 
                         val delta = afterBreakpoint - beforeBreakpoint
-                        springTarget += delta
-                        springState = springState.addDisplacement(-delta)
+                        val deltaIsFinite = delta.fastIsFinite()
+                        if (!deltaIsFinite) {
+                            Log.wtf(
+                                TAG,
+                                "Delta between breakpoints is undefined!\n" +
+                                    "  MotionValue: $label\n" +
+                                    "  position: ${nextBreakpoint.position}\n" +
+                                    "  before: $beforeBreakpoint (mapping: $mappingBefore)\n" +
+                                    "  after: $afterBreakpoint (mapping: $mappingAfter)",
+                            )
+                        }
 
+                        if (deltaIsFinite) {
+                            springTarget += delta
+                            springState = springState.addDisplacement(-delta)
+                        }
                         segmentIndex += directionOffset
                         lastBreakpoint = nextBreakpoint
                         guaranteeState =
@@ -828,7 +857,9 @@ class MotionValue(
     }
 
     private val currentDirectMapped: Float
-        get() = currentSegment.mapping.map(currentInput()) - currentAnimation.targetValue
+        get() {
+            return currentSegment.mapping.map(currentInput()) - currentAnimation.targetValue
+        }
 
     private val currentAnimatedDelta: Float
         get() = currentAnimation.targetValue + currentSpringState.displacement
