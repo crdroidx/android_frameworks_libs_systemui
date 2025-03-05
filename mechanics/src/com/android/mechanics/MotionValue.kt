@@ -198,6 +198,13 @@ class MotionValue(
 
             try {
                 debugIsAnimating = true
+
+                // indicates whether withFrameNanos is called continuously (as opposed to being
+                // suspended for an undetermined amount of time in between withFrameNanos).
+                // This is essential after `withFrameNanos` returned: if true at this point,
+                // currentAnimationTimeNanos - lastFrameNanos is the duration of the last frame.
+                var isAnimatingUninterrupted = false
+
                 while (continueRunning.invoke(this@MotionValue)) {
 
                     withFrameNanos { frameTimeNanos ->
@@ -223,6 +230,19 @@ class MotionValue(
                     // while at the same time not already applying the `last*` state (as this would
                     // cause a re-computation if the current state is being read before the next
                     // frame).
+
+                    if (isAnimatingUninterrupted) {
+                        val currentDirectMapped = currentDirectMapped
+                        val lastDirectMapped =
+                            lastSegment.mapping.map(lastInput) - lastAnimation.targetValue
+
+                        val frameDuration =
+                            (currentAnimationTimeNanos - lastFrameTimeNanos) / 1_000_000_000.0
+                        val staticDelta = (currentDirectMapped - lastDirectMapped)
+                        directMappedVelocity = (staticDelta / frameDuration).toFloat()
+                    } else {
+                        directMappedVelocity = 0f
+                    }
 
                     var scheduleNextFrame = !isStable
                     if (capturedSegment != currentSegment) {
@@ -275,6 +295,7 @@ class MotionValue(
                             )
                     }
 
+                    isAnimatingUninterrupted = scheduleNextFrame
                     if (scheduleNextFrame) {
                         continue
                     }
@@ -375,6 +396,11 @@ class MotionValue(
      */
     private var lastAnimation: DiscontinuityAnimation by
         mutableStateOf(DiscontinuityAnimation.None, referentialEqualityPolicy())
+
+    // The change velocity of the `currentDirectMapped`, in `units/sec`. Only non-zero if the
+    // animation loop is processing every frame (while animating or while the input changes
+    // continuously).
+    private var directMappedVelocity: Float = 0f
 
     // ---- Last frame's input and output ----------------------------------------------------------
 
@@ -702,7 +728,7 @@ class MotionValue(
                     val newTarget = delta - lastSpringState.displacement
                     DiscontinuityAnimation(
                         newTarget,
-                        SpringState(-newTarget, lastSpringState.velocity),
+                        SpringState(-newTarget, lastSpringState.velocity + directMappedVelocity),
                         springParameters,
                         lastFrameTimeNanos,
                     )
@@ -800,7 +826,7 @@ class MotionValue(
 
                         if (deltaIsFinite) {
                             springTarget += delta
-                            springState = springState.addDisplacement(-delta)
+                            springState = springState.nudge(displacementDelta = -delta)
                         }
                         segmentIndex += directionOffset
                         lastBreakpoint = nextBreakpoint
@@ -820,6 +846,10 @@ class MotionValue(
 
                                 is Guarantee.None -> GuaranteeState.Inactive
                             }
+                    }
+
+                    if (springState.displacement != 0f) {
+                        springState = springState.nudge(velocityDelta = directMappedVelocity)
                     }
 
                     val tightened =

@@ -184,6 +184,27 @@ class MotionValueTest {
         }
 
     @Test
+    fun segmentChange_appliesOutputVelocity_atSpringStart() =
+        motion.goldenTest(spec = specBuilder().toBreakpoint(10f).completeWith(Mapping.Fixed(20f))) {
+            animateValueTo(11f, changePerFrame = 3f)
+            awaitStable()
+        }
+
+    @Test
+    fun segmentChange_appliesOutputVelocity_springVelocityIsNotAppliedTwice() =
+        motion.goldenTest(
+            spec =
+                specBuilder()
+                    .toBreakpoint(10f)
+                    .continueWith(Mapping.Linear(factor = 1f, offset = 20f))
+                    .toBreakpoint(20f)
+                    .completeWith(Mapping.Fixed(40f))
+        ) {
+            animateValueTo(21f, changePerFrame = 3f)
+            awaitStable()
+        }
+
+    @Test
     fun specChange_shiftSegmentBackwards_doesNotAnimateWithinSegment_animatesSegmentChange() {
         fun generateSpec(offset: Float) =
             specBuilder(Mapping.Zero)
