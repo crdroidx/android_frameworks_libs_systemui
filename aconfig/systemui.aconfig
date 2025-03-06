@@ -150,3 +150,13 @@ flag {
   description: "Enables hot corner navigation by cursor"
   bug: "397182595"
 }
+
+flag {
+    name: "smartspace_remoteviews_intent_handler"
+    namespace: "systemui"
+    description: "Enables Smartspace RemoteViews intent handling on lockscreen"
+    bug: "399416038"
+    metadata {
+         purpose: PURPOSE_BUGFIX
+    }
+}
