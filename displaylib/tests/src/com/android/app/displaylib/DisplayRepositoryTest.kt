@@ -17,16 +17,11 @@ package com.android.app.displaylib
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.filters.SmallTest
-import com.google.common.truth.Truth.assertThat
-import org.junit.Test
 import org.junit.runner.RunWith
 
 @SmallTest
 @RunWith(AndroidJUnit4::class)
 class DisplayRepositoryTest {
 
-    @Test
-    fun displays_empty() {
-        assertThat(DisplayRepositoryImpl().displays.value).isEmpty()
-    }
+    // TODO b/401305290 - Move tests from The SystemUI DisplayRepositoryImpl to here.
 }

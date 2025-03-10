@@ -15,10 +15,15 @@
  */
 package com.android.app.displaylib
 
+import android.hardware.display.DisplayManager
+import android.os.Handler
 import dagger.Binds
+import dagger.BindsInstance
 import dagger.Component
 import dagger.Module
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 
 /**
  * Component that creates all classes in displaylib.
@@ -33,7 +38,12 @@ interface DisplayLibComponent {
 
     @Component.Factory
     interface Factory {
-        fun create(): DisplayLibComponent
+        fun create(
+            @BindsInstance displayManager: DisplayManager,
+            @BindsInstance bgHandler: Handler,
+            @BindsInstance bgApplicationScope: CoroutineScope,
+            @BindsInstance backgroundCoroutineDispatcher: CoroutineDispatcher,
+        ): DisplayLibComponent
     }
 
     val displayRepository: DisplayRepository
@@ -47,8 +57,16 @@ interface DisplayLibModule {
 /**
  * Just a wrapper to make the generated code to create the component more explicit.
  *
- * This should be called only once per process.
+ * This should be called only once per process. Note that [bgHandler], [bgApplicationScope] and
+ * [backgroundCoroutineDispatcher] are expected to be backed by background threads. In the future
+ * this might throw an exception if they are tied to the main thread!
  */
-fun createDisplayLibComponent(): DisplayLibComponent {
-    return DaggerDisplayLibComponent.factory().create()
+fun createDisplayLibComponent(
+    displayManager: DisplayManager,
+    bgHandler: Handler,
+    bgApplicationScope: CoroutineScope,
+    backgroundCoroutineDispatcher: CoroutineDispatcher,
+): DisplayLibComponent {
+    return DaggerDisplayLibComponent.factory()
+        .create(displayManager, bgHandler, bgApplicationScope, backgroundCoroutineDispatcher)
 }

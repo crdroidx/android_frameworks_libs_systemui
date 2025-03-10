@@ -23,6 +23,7 @@ java_library {
         "kotlinx_coroutines_android",
         "dagger2",
         "jsr330",
+        "//frameworks/libs/systemui:tracinglib-platform",
     ],
     plugins: ["dagger2-compiler"],
     srcs: ["src/**/*.kt"],
