@@ -24,6 +24,7 @@ android_test {
         "androidx.test.ext.junit",
         "androidx.test.rules",
         "truth",
+        "//frameworks/libs/systemui:tracinglib-platform",
     ],
     srcs: [
         "tests/src/**/*.kt",
