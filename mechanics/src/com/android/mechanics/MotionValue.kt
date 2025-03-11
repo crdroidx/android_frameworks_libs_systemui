@@ -31,22 +31,20 @@ import androidx.compose.ui.util.fastCoerceAtLeast
 import androidx.compose.ui.util.fastCoerceIn
 import androidx.compose.ui.util.fastIsFinite
 import androidx.compose.ui.util.lerp
-import androidx.compose.ui.util.packFloats
-import androidx.compose.ui.util.unpackFloat1
-import androidx.compose.ui.util.unpackFloat2
 import com.android.mechanics.debug.DebugInspector
 import com.android.mechanics.debug.FrameData
+import com.android.mechanics.impl.DiscontinuityAnimation
+import com.android.mechanics.impl.GuaranteeState
+import com.android.mechanics.impl.SegmentChangeType
 import com.android.mechanics.spec.Breakpoint
 import com.android.mechanics.spec.Guarantee
 import com.android.mechanics.spec.InputDirection
 import com.android.mechanics.spec.Mapping
 import com.android.mechanics.spec.MotionSpec
 import com.android.mechanics.spec.SegmentData
-import com.android.mechanics.spring.SpringParameters
 import com.android.mechanics.spring.SpringState
 import com.android.mechanics.spring.calculateUpdatedState
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.max
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -471,56 +469,6 @@ class MotionValue(
         } else {
             lastSegment
         }
-    }
-
-    /**
-     * Describes how the [currentSegment] is different from last frame's [lastSegment].
-     *
-     * This affects how the discontinuities are animated and [Guarantee]s applied.
-     */
-    private enum class SegmentChangeType {
-        /**
-         * The segment has the same key, this is considered equivalent.
-         *
-         * Only the [GuaranteeState] needs to be kept updated.
-         */
-        Same,
-
-        /**
-         * The segment's direction changed, however the min / max breakpoints remain the same: This
-         * is a direction change within a segment.
-         *
-         * The delta between the mapping must be animated with the reset spring, and there is no
-         * guarantee associated with the change.
-         */
-        SameOppositeDirection,
-
-        /**
-         * The segment and its direction change. This is a direction change that happened over a
-         * segment boundary.
-         *
-         * The direction change might have happened outside the [lastSegment] already, since a
-         * segment can't be exited at the entry side.
-         */
-        Direction,
-
-        /**
-         * The segment changed, due to the [currentInput] advancing in the [currentDirection],
-         * crossing one or more breakpoints.
-         *
-         * The guarantees of all crossed breakpoints have to be applied. The [GuaranteeState] must
-         * be reset, and a new [DiscontinuityAnimation] is started.
-         */
-        Traverse,
-
-        /**
-         * The spec was changed and added or removed the previous and/or current segment.
-         *
-         * The [MotionValue] does not have a semantic understanding of this change, hence the
-         * difference output produced by the previous and current mapping are animated with the
-         * [MotionSpec.resetSpring]
-         */
-        Spec,
     }
 
     /** Computes the [SegmentChangeType] between [lastSegment] and [currentSegment]. */
@@ -949,79 +897,3 @@ class MotionValue(
         return checkNotNull(debugInspector)
     }
 }
-
-/**
- * Captures the start-state of a spring-animation to smooth over a discontinuity.
- *
- * Discontinuities are caused by segment changes, where the new and old segment produce different
- * output values for the same input.
- */
-internal data class DiscontinuityAnimation(
-    val targetValue: Float,
-    val springStartState: SpringState,
-    val springParameters: SpringParameters,
-    val springStartTimeNanos: Long,
-) {
-    val isAtRest: Boolean
-        get() = springStartState == SpringState.AtRest
-
-    companion object {
-        val None =
-            DiscontinuityAnimation(
-                targetValue = 0f,
-                springStartState = SpringState.AtRest,
-                springParameters = SpringParameters.Snap,
-                springStartTimeNanos = 0L,
-            )
-    }
-}
-
-/**
- * Captures the origin of a guarantee, and the maximal distance the input has been away from the
- * origin at most.
- */
-@JvmInline
-internal value class GuaranteeState(val packedValue: Long) {
-    private val start: Float
-        get() = unpackFloat1(packedValue)
-
-    private val maxDelta: Float
-        get() = unpackFloat2(packedValue)
-
-    private val isInactive: Boolean
-        get() = this == Inactive
-
-    fun withCurrentValue(value: Float, direction: InputDirection): GuaranteeState {
-        if (isInactive) return Inactive
-
-        val delta = ((value - start) * direction.sign).fastCoerceAtLeast(0f)
-        return GuaranteeState(start, max(delta, maxDelta))
-    }
-
-    fun updatedSpringParameters(breakpoint: Breakpoint): SpringParameters {
-        if (isInactive) return breakpoint.spring
-
-        val denominator =
-            when (val guarantee = breakpoint.guarantee) {
-                is Guarantee.None -> return breakpoint.spring
-                is Guarantee.InputDelta -> guarantee.delta
-                is Guarantee.GestureDragDelta -> guarantee.delta
-            }
-
-        val springTighteningFraction = maxDelta / denominator
-        return com.android.mechanics.spring.lerp(
-            breakpoint.spring,
-            SpringParameters.Snap,
-            springTighteningFraction,
-        )
-    }
-
-    companion object {
-        val Inactive = GuaranteeState(packFloats(Float.NaN, Float.NaN))
-
-        fun withStartValue(start: Float) = GuaranteeState(packFloats(start, 0f))
-    }
-}
-
-internal fun GuaranteeState(start: Float, maxDelta: Float) =
-    GuaranteeState(packFloats(start, maxDelta))
