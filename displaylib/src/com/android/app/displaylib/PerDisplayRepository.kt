@@ -18,6 +18,7 @@ package com.android.app.displaylib
 
 import android.util.Log
 import android.view.Display
+import com.android.app.tracing.coroutines.flow.stateInTraced
 import com.android.app.tracing.coroutines.launchTraced as launch
 import com.android.app.tracing.traceSection
 import dagger.assisted.Assisted
@@ -26,7 +27,10 @@ import dagger.assisted.AssistedInject
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Qualifier
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 
 /**
  * Used to create instances of type `T` for a specific display.
@@ -109,10 +113,16 @@ interface PerDisplayRepository<T> {
  *
  * This class manages a cache of per-display instances of type `T`, creating them using a provided
  * [PerDisplayInstanceProvider] and optionally tearing them down using a
- * [PerDisplayInstanceProviderWithTeardown] when displays are disconnected.
+ * [PerDisplayInstanceProviderWithTeardown] when based on [lifecycleManager].
  *
- * It listens to the [DisplayRepository] to detect when displays are added or removed, and
- * automatically manages the lifecycle of the per-display instances.
+ * An instance will be destroyed when either
+ * - The display is not connected anymore
+ * - or based on [lifecycleManager]. If no lifecycle manager is provided, instances are destroyed
+ *   when the display is disconnected.
+ *
+ * [DisplayInstanceLifecycleManager] can decide to delete instances for a display even before it is
+ * disconnected. An example of usecase for it, is to delete instances when screen decorations are
+ * removed.
  *
  * Note that this is a [PerDisplayStoreImpl] 2.0 that doesn't require [CoreStartable] bindings,
  * providing all args in the constructor.
@@ -122,6 +132,7 @@ class PerDisplayInstanceRepositoryImpl<T>
 constructor(
     @Assisted override val debugName: String,
     @Assisted private val instanceProvider: PerDisplayInstanceProvider<T>,
+    @Assisted lifecycleManager: DisplayInstanceLifecycleManager? = null,
     @DisplayLibBackground bgApplicationScope: CoroutineScope,
     private val displayRepository: DisplayRepository,
     private val initCallback: PerDisplayRepository.InitCallback,
@@ -129,13 +140,34 @@ constructor(
 
     private val perDisplayInstances = ConcurrentHashMap<Int, T?>()
 
+    private val allowedDisplays: StateFlow<Set<Int>> =
+        if (lifecycleManager == null) {
+                displayRepository.displayIds
+            } else {
+                // If there is a lifecycle manager, we still consider the smallest subset between
+                // the ones connected and the ones from the lifecycle. This is to safeguard against
+                // leaks, in case of lifecycle manager misbehaving (as it's provided by clients, and
+                // we can't guarantee it's correct).
+                combine(lifecycleManager.displayIds, displayRepository.displayIds) {
+                    lifecycleAllowedDisplayIds,
+                    connectedDisplays ->
+                    lifecycleAllowedDisplayIds.intersect(connectedDisplays)
+                }
+            }
+            .stateInTraced(
+                "allowed displays for $debugName",
+                bgApplicationScope,
+                SharingStarted.WhileSubscribed(),
+                setOf(Display.DEFAULT_DISPLAY),
+            )
+
     init {
         bgApplicationScope.launch("$debugName#start") { start() }
     }
 
     private suspend fun start() {
         initCallback.onInit(debugName, this)
-        displayRepository.displayIds.collectLatest { displayIds ->
+        allowedDisplays.collectLatest { displayIds ->
             val toRemove = perDisplayInstances.keys - displayIds
             toRemove.forEach { displayId ->
                 Log.d(TAG, "<$debugName> destroying instance for displayId=$displayId.")
@@ -151,6 +183,15 @@ constructor(
     override fun get(displayId: Int): T? {
         if (displayRepository.getDisplay(displayId) == null) {
             Log.e(TAG, "<$debugName: Display with id $displayId doesn't exist.")
+            return null
+        }
+
+        if (displayId !in allowedDisplays.value) {
+            Log.e(
+                TAG,
+                "<$debugName: Display with id $displayId exists but it's not " +
+                    "allowed by lifecycle manager.",
+            )
             return null
         }
 
@@ -176,6 +217,7 @@ constructor(
         fun create(
             debugName: String,
             instanceProvider: PerDisplayInstanceProvider<T>,
+            overrideLifecycleManager: DisplayInstanceLifecycleManager? = null,
         ): PerDisplayInstanceRepositoryImpl<T>
     }
 
