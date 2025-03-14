@@ -21,4 +21,6 @@ interface LiveWallpaperKeyguardEventListener {
 
     /** Called when the keyguard is going away. */
     fun onKeyguardGoingAway()
+
+    fun onKeyguardAppearing()
 }
