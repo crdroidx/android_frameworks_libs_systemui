@@ -140,7 +140,7 @@ public abstract class ViewCapture {
 
         mListeners.add(listener);
 
-        runOnUiThread(() -> view.getContext().registerComponentCallbacks(listener), view);
+        view.getContext().registerComponentCallbacks(listener);
 
         return () -> {
             if (listener.mRoot != null && listener.mRoot.getContext() != null) {
